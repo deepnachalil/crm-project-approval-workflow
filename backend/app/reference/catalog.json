@@ -1,0 +1,22 @@
+{
+  "rate_cards": [
+    {"code": "STD-ENG", "name": "Standard Engineering", "currency": "INR", "description": "Standard hourly rates for engineering roles"},
+    {"code": "SR-ENG", "name": "Senior Engineering", "currency": "INR", "description": "Rates for senior / lead engineering roles"},
+    {"code": "QA-STD", "name": "QA Standard", "currency": "INR", "description": "Quality assurance and testing rates"},
+    {"code": "MGMT-STD", "name": "Management Standard", "currency": "INR", "description": "Project and delivery management rates"},
+    {"code": "DESIGN-STD", "name": "Design Standard", "currency": "INR", "description": "UI/UX and visual design rates"},
+    {"code": "OPS-STD", "name": "Operations Standard", "currency": "INR", "description": "DevOps, SRE and support rates"}
+  ],
+  "job_categories": [
+    {"name": "Software Developer", "default_rate_card": "STD-ENG"},
+    {"name": "Senior Software Developer", "default_rate_card": "SR-ENG"},
+    {"name": "QA Engineer", "default_rate_card": "QA-STD"},
+    {"name": "Project Manager", "default_rate_card": "MGMT-STD"},
+    {"name": "UI/UX Designer", "default_rate_card": "DESIGN-STD"},
+    {"name": "DevOps Engineer", "default_rate_card": "OPS-STD"}
+  ],
+  "business_units": ["Digital Engineering", "Data & Analytics", "Cloud Services", "Enterprise Applications", "Consulting"],
+  "payment_modes": ["Bank Transfer", "Cheque", "Credit Card", "Letter of Credit"],
+  "currencies": ["INR", "USD", "EUR", "GBP", "AED", "SGD"],
+  "document_types": ["Master Services Agreement", "Statement of Work", "Non-Disclosure Agreement", "Purchase Order", "Amendment", "Other"]
+}
