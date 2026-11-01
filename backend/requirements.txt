@@ -1,0 +1,12 @@
+# Runtime dependencies (packaged into the Lambda function by `sam build`).
+# boto3 is intentionally not listed: it is only used when STORAGE_BACKEND=s3 or
+# DB_SECRET_ARN is set (i.e. on AWS), and the Lambda Python runtime provides it.
+fastapi>=0.115
+mangum>=0.19
+sqlalchemy>=2.0.36
+alembic>=1.14
+psycopg[binary]>=3.2
+pydantic>=2.9
+pydantic-settings>=2.6
+PyJWT>=2.9
+python-multipart>=0.0.18
