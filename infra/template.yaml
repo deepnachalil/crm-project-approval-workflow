@@ -1,0 +1,459 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CRM Project Setup & Approval Workflow - React (S3 + CloudFront), API Gateway + Lambda (Python),
+  RDS PostgreSQL, S3 contract storage and Cognito authentication.
+
+  NOT DEPLOYED YET. No credentials are stored here: Lambda uses its IAM execution role,
+  and the database password is generated and kept in Secrets Manager by RDS.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  DBName:
+    Type: String
+    Default: crm_projects
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]*"
+  DBUsername:
+    Type: String
+    Default: crm_admin
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]*"
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+  DBMultiAZ:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  MaxUploadMb:
+    Type: Number
+    Default: 5
+    MaxValue: 5   # API Gateway -> Lambda payloads are limited to ~6 MB
+  VpcCidr:
+    Type: String
+    Default: 10.20.0.0/16
+  FrontendHosting:
+    Type: String
+    Default: cloudfront
+    AllowedValues: [cloudfront, s3website]
+    Description: >
+      cloudfront = private bucket behind CloudFront (HTTPS, recommended).
+      s3website  = public S3 website endpoint (HTTP only) - fallback for accounts that are
+      not yet verified for CloudFront.
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
+  UseCloudFront: !Equals [!Ref FrontendHosting, cloudfront]
+  UseS3Website: !Not [!Condition UseCloudFront]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 29
+    VpcConfig:
+      SecurityGroupIds: [!Ref LambdaSecurityGroup]
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+    Environment:
+      Variables:
+        APP_ENV: aws
+        DB_HOST: !GetAtt Database.Endpoint.Address
+        DB_PORT: !GetAtt Database.Endpoint.Port
+        DB_NAME: !Ref DBName
+        DB_SECRET_ARN: !GetAtt Database.MasterUserSecret.SecretArn
+        AUTH_MODE: cognito
+        COGNITO_USER_POOL_ID: !Ref UserPool
+        COGNITO_CLIENT_ID: !Ref UserPoolClient
+        STORAGE_BACKEND: s3
+        S3_BUCKET_NAME: !Ref ContractsBucket
+        MAX_UPLOAD_MB: !Ref MaxUploadMb
+        CORS_ORIGINS: !If
+          - UseCloudFront
+          - !Sub "https://${FrontendDistribution.DomainName}"
+          - !GetAtt FrontendBucket.WebsiteURL
+        # AWS_REGION is set automatically by the Lambda runtime.
+
+Resources:
+  # ------------------------------------------------------------------ network
+  # Lambda and RDS live in private subnets. There is no NAT gateway: S3 is reached
+  # through a gateway endpoint and Secrets Manager through an interface endpoint.
+  # Cognito tokens are validated by API Gateway, so Lambda needs no internet access.
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: !Sub "crm-projects-${Stage}" }]
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      Tags: [{ Key: Name, Value: !Sub "crm-projects-${Stage}-private-a" }]
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      Tags: [{ Key: Name, Value: !Sub "crm-projects-${Stage}-private-b" }]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PrivateSubnetARouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: API / migration Lambda functions
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, CidrIp: !Ref VpcCidr }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }   # VPC endpoints (S3 prefix list / interface)
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS PostgreSQL - only reachable from the Lambda functions
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref LambdaSecurityGroup }
+
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Interface VPC endpoints
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref LambdaSecurityGroup }
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRouteTable]
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  # ----------------------------------------------------------------- database
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for the CRM projects database
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: "17.6"
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      ManageMasterUserPassword: true          # password generated & stored in Secrets Manager
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: !Ref DBMultiAZ
+      BackupRetentionPeriod: !If [IsProd, 14, 7]
+      DeletionProtection: !If [IsProd, true, false]
+      AutoMinorVersionUpgrade: true
+
+  # ---------------------------------------------------------- contract files
+  ContractsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration: { NoncurrentDays: 90 }
+
+  ContractsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ContractsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt ContractsBucket.Arn, !Sub "${ContractsBucket.Arn}/*"]
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+
+  # ---------------------------------------------------------- authentication
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "crm-projects-${Stage}"
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true        # users are provisioned by an administrator
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{ Name: verified_email, Priority: 1 }]
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "crm-projects-web-${Stage}"
+      GenerateSecret: false                   # public SPA client
+      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      IdTokenValidity: 8
+      AccessTokenValidity: 8
+      TokenValidityUnits: { IdToken: hours, AccessToken: hours, RefreshToken: days }
+
+  # Informational groups; the application's authoritative role is the users.role_id column.
+  CrmGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { UserPoolId: !Ref UserPool, GroupName: CRM, Description: Project creators }
+
+  ApproverGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { UserPoolId: !Ref UserPool, GroupName: APPROVER, Description: Project reviewers }
+
+  # ---------------------------------------------------------------------- API
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      BinaryMediaTypes: [multipart/form-data]
+      Cors:
+        AllowOrigin: !If
+          - UseCloudFront
+          - !Sub "'https://${FrontendDistribution.DomainName}'"
+          - !Sub "'${FrontendBucket.WebsiteURL}'"
+        AllowHeaders: "'Authorization,Content-Type'"
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+      GatewayResponses:   # CORS headers on authorizer/gateway errors so the browser can read them
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !If
+                - UseCloudFront
+                - !Sub "'https://${FrontendDistribution.DomainName}'"
+                - !Sub "'${FrontendBucket.WebsiteURL}'"
+              Access-Control-Allow-Headers: "'Authorization,Content-Type'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !If
+                - UseCloudFront
+                - !Sub "'https://${FrontendDistribution.DomainName}'"
+                - !Sub "'${FrontendBucket.WebsiteURL}'"
+              Access-Control-Allow-Headers: "'Authorization,Content-Type'"
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: CRM project REST API (FastAPI via Mangum)
+      CodeUri: ../backend   # set per function (not in Globals) so `aws cloudformation package` also resolves it
+      Handler: app.lambda_handler.handler
+      Policies:
+        - VPCAccessPolicy: {}
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !GetAtt Database.MasterUserSecret.SecretArn
+        - Statement:
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+              Resource: !Sub "${ContractsBucket.Arn}/projects/*"
+      Events:
+        Proxy:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /{proxy+}
+            Method: ANY
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /health
+            Method: GET
+            Auth: { Authorizer: NONE }
+
+  MigrationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Runs Alembic migrations (and optional reference-data seed) inside the VPC
+      CodeUri: ../backend
+      Handler: app.migrate_handler.handler
+      Timeout: 300
+      Policies:
+        - VPCAccessPolicy: {}
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !GetAtt Database.MasterUserSecret.SecretArn
+
+  # ----------------------------------------------------------------- frontend
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      # Website mode needs a public-read bucket policy; ACLs stay blocked either way.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: !If [UseCloudFront, true, false]
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: !If [UseCloudFront, true, false]
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      WebsiteConfiguration: !If
+        - UseS3Website
+        - { IndexDocument: index.html, ErrorDocument: index.html }   # SPA routing
+        - !Ref AWS::NoValue
+
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: UseCloudFront
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "crm-projects-frontend-${Stage}-${AWS::StackName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: UseCloudFront
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "CRM projects frontend (${Stage})"
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: frontend-s3
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }
+        DefaultCacheBehavior:
+          TargetOriginId: frontend-s3
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # AWS managed "CachingOptimized"
+        CustomErrorResponses:   # SPA routing: let React Router handle unknown paths
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html }
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - !If
+            - UseCloudFront
+            - Sid: AllowCloudFrontRead
+              Effect: Allow
+              Principal: { Service: cloudfront.amazonaws.com }
+              Action: s3:GetObject
+              Resource: !Sub "${FrontendBucket.Arn}/*"
+              Condition:
+                StringEquals:
+                  AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+            - Sid: AllowPublicWebsiteRead
+              Effect: Allow
+              Principal: "*"
+              Action: s3:GetObject
+              Resource: !Sub "${FrontendBucket.Arn}/*"
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for VITE_API_BASE_URL
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+  FrontendUrl:
+    Value: !If
+      - UseCloudFront
+      - !Sub "https://${FrontendDistribution.DomainName}"
+      - !GetAtt FrontendBucket.WebsiteURL
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
+  FrontendDistributionId:
+    Condition: UseCloudFront
+    Value: !Ref FrontendDistribution
+  ContractsBucketName:
+    Value: !Ref ContractsBucket
+  UserPoolId:
+    Description: VITE_COGNITO_USER_POOL_ID
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: VITE_COGNITO_CLIENT_ID
+    Value: !Ref UserPoolClient
+  MigrationFunctionName:
+    Value: !Ref MigrationFunction
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DatabaseSecretArn:
+    Description: RDS-managed master credentials (never copied into config)
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
