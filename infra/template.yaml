@@ -4,7 +4,7 @@ Description: >
   CRM Project Setup & Approval Workflow - React (S3 + CloudFront), API Gateway + Lambda (Python),
   RDS PostgreSQL, S3 contract storage and Cognito authentication.
 
-  NOT DEPLOYED YET. No credentials are stored here: Lambda uses its IAM execution role,
+  No credentials are stored here: Lambda uses its IAM execution role,
   and the database password is generated and kept in Secrets Manager by RDS.
 
 Parameters:

@@ -8,9 +8,9 @@ A full-stack application for configuring client projects and routing them throug
 - Contract document storage on **local disk** in development and **Amazon S3** on AWS
 - **Role-based authentication**: local JWT login in development, **Amazon Cognito** on AWS
 
-> **Deployment status:** Phase 1 (local implementation) only. Nothing has been deployed and no AWS
-> credentials are used anywhere in this repository. `infra/template.yaml` describes the AWS stack but
-> must not be deployed until the code has been reviewed and credentials are supplied (see [§10](#10-aws-deployment-future-phase)).
+> **Deployment status:** deployed to AWS as the CloudFormation stack `crm-projects-dev` in `ap-south-1`
+> (Mumbai) from `infra/template.yaml`. No AWS credentials are stored anywhere in this repository; the
+> running app uses IAM roles. See [§10](#10-aws-deployment).
 
 ---
 
@@ -25,7 +25,7 @@ A full-stack application for configuring client projects and routing them throug
 7. [Test credentials](#7-test-credentials)
 8. [Database schema](#8-database-schema)
 9. [Approval workflow & versioning](#9-approval-workflow--versioning)
-10. [AWS deployment (future phase)](#10-aws-deployment-future-phase)
+10. [AWS deployment](#10-aws-deployment)
 11. [Testing](#11-testing)
 12. [Security notes](#12-security-notes)
 13. [Design decisions & known limitations](#13-design-decisions--known-limitations)
@@ -138,7 +138,7 @@ project-root/
 │   │   └── utils/               Formatting and validation helpers
 │   └── .env.example
 ├── infra/
-│   └── template.yaml            AWS SAM / CloudFormation stack (NOT deployed)
+│   └── template.yaml            AWS SAM / CloudFormation stack (deployed as crm-projects-dev)
 ├── docker-compose.yml           Local PostgreSQL
 └── README.md
 ```
@@ -283,12 +283,16 @@ Interactive OpenAPI docs are served at **`http://localhost:8000/docs`** when the
 `ClientInput`:
 ```json
 { "legal_entity_name": "Acme Technologies Pvt Ltd", "registered_address": "…", "billing_address": "…",
-  "mode_of_payment": "Bank Transfer", "gst_number": "29ABCDE1234F1Z5", "billing_currency": "INR",
+  "mode_of_payment": "Bank Transfer", "country": "IN", "gst_number": "29ABCDE1234F1Z5", "billing_currency": "INR",
   "primary_contact": { "name": "…", "designation": "…", "phone": "+91 98450 12345", "email": "…" } }
 ```
-`gst_number` is optional (validated as a GSTIN when given). `mode_of_payment` and `billing_currency` must come from the catalog (`GET /meta`).
+`billing_address` is optional: when omitted or blank it is set to the `registered_address` (the form's "Same as registered address" checkbox). `country` is the ISO 3166-1 alpha-2 country of registration. `gst_number` is **mandatory for every client**: Indian entities (`country` = `IN`) must give a valid 15-character GSTIN; non-Indian entities, which have no GSTIN, give their tax registration number (VAT / EIN / TRN, 5–20 letters or digits). A project cannot be submitted while its client has no GST Number (e.g. clients saved before this rule). `mode_of_payment`, `billing_currency` and `country` must come from the catalog (`GET /meta`).
 
 ### Projects
+
+**Ownership:** only the project's **CRM / Creator** (the CRM selected in Basic Information, by default the person who created it) can edit it, upload or delete contracts, submit or resubmit it. Other CRM users can view it read-only; their write requests return `403`, and `allowed_actions` / `can_edit` tell the UI to hide those buttons. The list's **Created By** column (`created_by`) and the **Creator** filter (`created_by=`) use this CRM / Creator, so the name shown is always the person who can edit the project; the audit trail still records who created the record.
+
+**Visibility:** CRM users share one project list and can open every project (the list has "Created By" and a "Creator" filter). An **approver only sees projects that were submitted to them** — the approver the CRM selected on the project. Other projects (drafts, or requests sent to another approver) are hidden from the list, and opening them, their history, audit trail or contracts returns `404`. Only the assigned approver can approve or reject (`403` otherwise).
 
 | Method | Endpoint | Role | Request | Response |
 |---|---|---|---|---|
@@ -391,7 +395,7 @@ audit_events (project_id, version_id, client_id, user_id, action, comment, detai
 | Table | Purpose / notes |
 |---|---|
 | `roles`, `users` | `CRM` / `APPROVER`. `password_hash` (PBKDF2) is used only in local auth mode. |
-| `clients` | Legal entity, addresses, payment mode, GST, currency, primary contact. Legal entity name is unique. |
+| `clients` | Legal entity, addresses, payment mode, country of registration, GST Number (required; GSTIN for India, tax ID elsewhere), currency, primary contact. Legal entity name is unique. |
 | `rate_cards`, `job_categories` | Configurable catalog seeded from `catalog.json` |
 | `projects` | Stable identity: unique `project_code`, creator, `latest_version_number` |
 | `project_versions` | All configuration. Unique `(project_id, version_number)`. **Partial unique index** guarantees at most one `is_active` version per project. |
@@ -465,10 +469,24 @@ describe, so a failed action leaves no audit record.
 
 ---
 
-## 10. AWS deployment (future phase)
+## 10. AWS deployment
 
-> ⚠️ **Not performed yet.** This happens only after the code has been reviewed and AWS credentials
-> have been provided and approved. No AWS calls have been made, and the repository contains no credentials.
+> ✅ **Deployed** after the code was reviewed and credentials were supplied. Credentials were used only as
+> temporary environment variables during deployment and are not stored in the repository.
+
+### Current deployment
+
+| Item | Value |
+|---|---|
+| Stack | `crm-projects-dev` (CloudFormation), region `ap-south-1` (Mumbai) |
+| Frontend | `http://crm-projects-dev-frontendbucket-onol6ynouez0.s3-website.ap-south-1.amazonaws.com` (S3 website hosting, `FrontendHosting=s3website`) |
+| Backend API | `https://be6ogbtvy2.execute-api.ap-south-1.amazonaws.com/dev` (API Gateway → Lambda) |
+| Authentication | Cognito user pool `crm-projects-dev`, 4 demo users (see [§7](#7-test-credentials)) |
+| Database | RDS PostgreSQL 17.6, `db.t4g.micro`, single-AZ, private subnets |
+| Cost profile | Pay-per-request Lambda / API Gateway, smallest RDS class, no NAT gateway |
+
+The frontend uses S3 website hosting (HTTP) because the AWS account is not yet verified for CloudFront;
+see [Frontend hosting fallback](#frontend-hosting-fallback-frontendhosting-parameter).
 
 ### What `infra/template.yaml` creates
 
@@ -478,22 +496,24 @@ describe, so a failed action leaves no audit record.
 | `AWS::RDS::DBInstance` (PostgreSQL 17) | Private, encrypted. `ManageMasterUserPassword` generates the password and stores it in Secrets Manager. Snapshot on delete. |
 | `AWS::S3::Bucket` (contracts) | Private, SSE, versioned, TLS-only bucket policy, retained on stack delete |
 | `AWS::Cognito::UserPool` + client | Admin-created users, strong password policy, public SPA client (no secret) |
-| `AWS::Serverless::Api` | Cognito authorizer by default, CORS restricted to the CloudFront origin, `multipart/form-data` binary support |
+| `AWS::Serverless::Api` | Cognito authorizer by default, CORS restricted to the frontend origin (CloudFront or S3 website), `multipart/form-data` binary support |
 | `AWS::Serverless::Function` ×2 | `ApiFunction` (FastAPI via Mangum) and `MigrationFunction` (Alembic). Least-privilege IAM: the RDS secret, S3 `projects/*` objects, VPC access. |
-| S3 + CloudFront (frontend) | Private bucket with Origin Access Control and SPA error routing |
+| S3 + CloudFront (frontend) | `FrontendHosting=cloudfront` (default): private bucket with Origin Access Control and SPA error routing. `FrontendHosting=s3website` (current): public-read S3 website endpoint |
 
 Lambda configuration is passed as environment variables derived from stack resources. The template
 contains no access keys or passwords. The template passes `cfn-lint` (run offline).
 
-### Planned steps (once approved)
+### Deployment steps
 
-1. Configure credentials securely (e.g. `aws configure sso` or a named profile, never committed). Verify with `aws sts get-caller-identity`.
-2. Build and deploy the backend stack from a clean checkout, so that `backend/.venv`, `tests/` and `storage/` aren't packaged:
+1. Configure credentials securely (e.g. `aws configure sso`, a named profile, or temporary environment variables; never committed). Verify with `aws sts get-caller-identity`.
+2. Build and deploy the backend stack. With SAM CLI and Docker:
    ```bash
    sam build --template-file infra/template.yaml --use-container
-   sam deploy --guided --stack-name crm-projects-dev --capabilities CAPABILITY_IAM
+   sam deploy --guided --stack-name crm-projects-dev --capabilities CAPABILITY_IAM \
+     --parameter-overrides FrontendHosting=s3website
    ```
-3. Run database migrations and seed reference data inside the VPC:
+   This deployment was built without SAM CLI / Docker instead; see [Building without SAM CLI / Docker](#building-without-sam-cli--docker).
+3. Run database migrations and seed reference data inside the VPC (safe to repeat on every deployment):
    ```bash
    aws lambda invoke --function-name <MigrationFunctionName> --payload '{"seed": true}' --cli-binary-format raw-in-base64-out out.json
    ```
@@ -503,9 +523,12 @@ contains no access keys or passwords. The template passes `cfn-lint` (run offlin
    VITE_API_BASE_URL=<ApiUrl> VITE_AUTH_MODE=cognito VITE_COGNITO_REGION=<region> \
    VITE_COGNITO_USER_POOL_ID=<UserPoolId> VITE_COGNITO_CLIENT_ID=<UserPoolClientId> npm run build
    aws s3 sync frontend/dist s3://<FrontendBucketName> --delete
-   aws cloudfront create-invalidation --distribution-id <FrontendDistributionId> --paths "/*"
+   aws cloudfront create-invalidation --distribution-id <FrontendDistributionId> --paths "/*"   # CloudFront mode only
    ```
 6. Run the complete workflow against the deployed URL (`FrontendUrl`).
+
+To remove everything: `aws cloudformation delete-stack --stack-name crm-projects-dev`. The contracts bucket and a
+final database snapshot are kept on purpose and must be deleted manually.
 
 ### Frontend hosting fallback (`FrontendHosting` parameter)
 
@@ -527,11 +550,11 @@ then point `CodeUri` at that folder and run `aws cloudformation package` + `aws 
 
 ## 11. Testing
 
-`cd backend && pytest` runs 61 tests covering:
+`cd backend && pytest` runs 77 tests covering:
 
 | Area | Examples |
 |---|---|
-| Auth & clients | login, invalid credentials, missing token, role guards, client validation (GSTIN, email), duplicates |
+| Auth & clients | login, invalid credentials, missing token, role guards, client validation (GSTIN, email), GST Number mandatory for all clients (GSTIN for India, tax ID elsewhere), country, billing address defaults to registered address, duplicates |
 | Project creation | required fields, unique Project ID, date order, client selection populates details, unknown client, approver role, unknown rate card, duplicate job categories, readiness report, listing filters |
 | Submission | incomplete project, no contract, no job categories, unmapped rate card, valid submission → Pending Approval, pending project locked |
 | Approval | approver approves (decision recorded), rejects with comment, rejection requires comment, CRM cannot approve, unassigned approver cannot decide, cannot approve a draft |
@@ -539,6 +562,8 @@ then point `CodeUri` at that folder and run `aws cloudformation package` + `aws 
 | Versioning | update to approved creates v2 draft, v1 unchanged and active, edits reuse the draft, v2 requires approval, approved v2 becomes active, rejected v2 keeps v1 active, field-level changes, no-op update rejected, contract upload/delete on approved project |
 | Contracts | upload/view/download, signed URL required, type/signature/empty/date/document-type validation, delete, historical versions immutable |
 | Audit | full lifecycle event sequence, event contents, field changes, failed actions not audited |
+| Ownership | only the CRM / Creator can edit, manage contracts, submit, resubmit or update an approved project; other CRMs are read-only (403) |
+| Visibility | approvers see only projects submitted to them (list, details, history, audit, contracts), keep access after deciding; all CRM users see all projects |
 | Migrations | Alembic upgrade matches the ORM models exactly; downgrade works |
 
 ---
