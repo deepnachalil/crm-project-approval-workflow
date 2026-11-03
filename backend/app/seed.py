@@ -30,6 +30,7 @@ DEMO_CLIENTS = [
         "registered_address": "12 MG Road, Bengaluru, Karnataka 560001",
         "billing_address": "12 MG Road, Bengaluru, Karnataka 560001",
         "mode_of_payment": "Bank Transfer",
+        "country": "IN",
         "gst_number": "29ABCDE1234F1Z5",
         "billing_currency": "INR",
         "contact_name": "Kavya Rao",
@@ -42,7 +43,8 @@ DEMO_CLIENTS = [
         "registered_address": "500 Market Street, San Francisco, CA 94105, USA",
         "billing_address": "PO Box 2210, San Francisco, CA 94126, USA",
         "mode_of_payment": "Letter of Credit",
-        "gst_number": None,
+        "country": "US",
+        "gst_number": "94-3211234",   # US EIN: non-Indian clients enter their tax registration number
         "billing_currency": "USD",
         "contact_name": "Daniel Moore",
         "contact_designation": "VP Engineering",

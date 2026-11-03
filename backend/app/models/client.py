@@ -12,6 +12,8 @@ class Client(TimestampMixin, Base):
     registered_address: Mapped[str] = mapped_column(Text, nullable=False)
     billing_address: Mapped[str] = mapped_column(Text, nullable=False)
     mode_of_payment: Mapped[str] = mapped_column(String(64), nullable=False)
+    # ISO 3166-1 alpha-2 country of registration. GST is mandatory when this is "IN".
+    country: Mapped[str] = mapped_column(String(2), nullable=False)
     gst_number: Mapped[str | None] = mapped_column(String(15))
     billing_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)

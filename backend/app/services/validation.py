@@ -20,6 +20,9 @@ def submission_issues(version: ProjectVersion) -> list[dict[str, str]]:
         issues.append(issue("business_unit", "Business unit is required"))
     if version.client_id is None:
         issues.append(issue("client_id", "Select a client"))
+    elif version.client is not None and not version.client.gst_number:
+        # Clients saved before GST became mandatory must be completed first.
+        issues.append(issue("client_id", "The selected client has no GST Number. Update the client details first"))
     if version.crm_user_id is None:
         issues.append(issue("crm_user_id", "CRM / creator is required"))
     if version.approver_id is None:

@@ -17,10 +17,16 @@ class JobCategoryOut(ORMModel):
     default_rate_card: RateCardOut | None
 
 
+class CountryOut(BaseModel):
+    code: str
+    name: str
+
+
 class MetaOut(BaseModel):
     business_units: list[str]
     payment_modes: list[str]
     currencies: list[str]
+    countries: list[CountryOut]
     document_types: list[str]
     allowed_file_extensions: list[str]
     max_upload_mb: int

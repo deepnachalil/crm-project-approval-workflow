@@ -9,6 +9,8 @@ export type Errors = Record<string, string>;
 export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export const PHONE_RE = /^\+?[0-9][0-9\s\-()]{6,19}$/;
 export const GST_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+/** Tax registration number of a non-Indian entity (VAT, EIN, TRN, ...). */
+export const TAX_ID_RE = /^[A-Z0-9][A-Z0-9 ./-]{3,18}[A-Z0-9]$/;
 export const PROJECT_CODE_RE = /^[A-Z0-9][A-Z0-9_-]{2,31}$/;
 
 export function required(value: unknown, message: string, errors: Errors, field: string) {

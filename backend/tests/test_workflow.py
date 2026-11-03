@@ -30,6 +30,20 @@ def test_cannot_submit_without_job_categories(api, db):
     assert _fields(res) == {"job_categories"}
 
 
+def test_cannot_submit_with_a_client_missing_its_gst_number(api, db):
+    from app.models import Client
+
+    project = api.ready_project(db)
+    # A client saved before GST became mandatory (e.g. migrated data) has no GST number.
+    db.get(Client, project["current_version"]["client"]["id"]).gst_number = None
+    db.commit()
+    res = api.post("crm", f"/projects/{project['id']}/submit", json={})
+    assert res.status_code == 422
+    assert {"field": "client_id", "message": "The selected client has no GST Number. Update the client details first"} in (
+        res.json()["error"]["details"]
+    )
+
+
 def test_cannot_submit_without_rate_card_mapping(api, db):
     project = api.create_project(db, job_categories=[{"name": "Software Developer"}])
     api.upload_contract(project["id"])

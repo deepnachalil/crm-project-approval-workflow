@@ -23,6 +23,8 @@ def _validate_reference_values(data: ClientIn) -> None:
         issues.append(issue("mode_of_payment", "Unsupported mode of payment"))
     if data.billing_currency not in catalog["currencies"]:
         issues.append(issue("billing_currency", "Unsupported billing currency"))
+    if data.country not in {c["code"] for c in catalog["countries"]}:
+        issues.append(issue("country", "Unsupported country"))
     if issues:
         raise ValidationFailedError("Invalid client details", issues)
 
@@ -32,6 +34,7 @@ def _apply(client: Client, data: ClientIn, user: User) -> None:
     client.registered_address = data.registered_address
     client.billing_address = data.billing_address
     client.mode_of_payment = data.mode_of_payment
+    client.country = data.country
     client.gst_number = data.gst_number
     client.billing_currency = data.billing_currency
     client.contact_name = data.primary_contact.name

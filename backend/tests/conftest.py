@@ -187,6 +187,7 @@ def client_payload(name: str = "Acme Technologies Pvt Ltd") -> dict:
         "registered_address": "12 MG Road, Bengaluru",
         "billing_address": "12 MG Road, Bengaluru",
         "mode_of_payment": "Bank Transfer",
+        "country": "IN",
         "gst_number": "29ABCDE1234F1Z5",
         "billing_currency": "INR",
         "primary_contact": {

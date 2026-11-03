@@ -35,6 +35,7 @@ def meta(_: CurrentUserDep) -> MetaOut:
         business_units=catalog["business_units"],
         payment_modes=catalog["payment_modes"],
         currencies=catalog["currencies"],
+        countries=catalog["countries"],
         document_types=catalog["document_types"],
         allowed_file_extensions=sorted(ALLOWED_UPLOAD_TYPES),
         max_upload_mb=settings.max_upload_mb,

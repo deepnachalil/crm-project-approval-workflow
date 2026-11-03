@@ -18,5 +18,18 @@
   "business_units": ["Digital Engineering", "Data & Analytics", "Cloud Services", "Enterprise Applications", "Consulting"],
   "payment_modes": ["Bank Transfer", "Cheque", "Credit Card", "Letter of Credit"],
   "currencies": ["INR", "USD", "EUR", "GBP", "AED", "SGD"],
+  "countries": [
+    {"code": "IN", "name": "India"},
+    {"code": "US", "name": "United States"},
+    {"code": "GB", "name": "United Kingdom"},
+    {"code": "AE", "name": "United Arab Emirates"},
+    {"code": "SG", "name": "Singapore"},
+    {"code": "DE", "name": "Germany"},
+    {"code": "FR", "name": "France"},
+    {"code": "NL", "name": "Netherlands"},
+    {"code": "AU", "name": "Australia"},
+    {"code": "CA", "name": "Canada"},
+    {"code": "JP", "name": "Japan"}
+  ],
   "document_types": ["Master Services Agreement", "Statement of Work", "Non-Disclosure Agreement", "Purchase Order", "Amendment", "Other"]
 }

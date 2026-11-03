@@ -32,8 +32,11 @@ export interface PrimaryContact {
 export interface ClientInput {
   legal_entity_name: string;
   registered_address: string;
-  billing_address: string;
+  /** Optional on input (null = same as registered address); always set on clients returned by the API. */
+  billing_address: string | null;
   mode_of_payment: string;
+  /** ISO 3166-1 alpha-2 country of registration; GST is mandatory for "IN". */
+  country: string;
   gst_number: string | null;
   billing_currency: string;
   primary_contact: PrimaryContact;
@@ -63,6 +66,7 @@ export interface Meta {
   business_units: string[];
   payment_modes: string[];
   currencies: string[];
+  countries: { code: string; name: string }[];
   document_types: string[];
   allowed_file_extensions: string[];
   max_upload_mb: number;

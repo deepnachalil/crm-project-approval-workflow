@@ -8,6 +8,7 @@ export function ClientDetails({ client }: { client: Client }) {
       <dt>Registered Address</dt><dd className="pre">{client.registered_address}</dd>
       <dt>Billing Address</dt><dd className="pre">{client.billing_address}</dd>
       <dt>Mode of Payment</dt><dd>{client.mode_of_payment}</dd>
+      <dt>Country of Registration</dt><dd>{client.country}</dd>
       <dt>GST Number</dt><dd>{client.gst_number ?? "—"}</dd>
       <dt>Billing Currency</dt><dd>{client.billing_currency}</dd>
       <dt>Primary Contact</dt>

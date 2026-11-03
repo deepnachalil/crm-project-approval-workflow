@@ -72,6 +72,9 @@ input:disabled { background: #f3f4f6; color: var(--muted); }
 .error-text { color: var(--danger); font-size: 0.83rem; }
 .error-text.block { display: block; margin-bottom: 10px; }
 .hint { color: var(--muted); font-size: 0.8rem; }
+.checkbox { display: flex; align-items: center; gap: 8px; margin: -6px 0 14px; font-size: 0.9rem; cursor: pointer; }
+.checkbox input { width: auto; margin: 0; }
+textarea:disabled { background: #f5f7fb; color: var(--muted); }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
 .sticky-actions { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--border); }
 .subform { border-top: 1px dashed var(--border); margin-top: 20px; padding-top: 16px; }
