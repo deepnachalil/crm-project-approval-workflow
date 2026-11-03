@@ -1,7 +1,7 @@
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, exists, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Contract, Project, ProjectVersion, VersionStatus
+from app.models import ApprovalRequest, Contract, Project, ProjectVersion, VersionStatus
 
 
 def get(db: Session, project_id: int, *, for_update: bool = False) -> Project | None:
@@ -30,8 +30,12 @@ def list_projects(
     client_id: int | None = None,
     created_by_id: int | None = None,
     search: str | None = None,
+    submitted_to_id: int | None = None,
 ) -> list[tuple[Project, ProjectVersion]]:
-    """Projects joined to their latest version (which drives the listed status)."""
+    """Projects joined to their latest version (which drives the listed status).
+
+    `submitted_to_id` limits the list to projects that were ever submitted to that approver.
+    """
     stmt = (
         select(Project, ProjectVersion)
         .join(
@@ -47,8 +51,12 @@ def list_projects(
         stmt = stmt.where(ProjectVersion.status == status)
     if client_id:
         stmt = stmt.where(ProjectVersion.client_id == client_id)
-    if created_by_id:
-        stmt = stmt.where(Project.created_by_id == created_by_id)
+    if created_by_id:   # "Creator" filter: the CRM / Creator of the latest version (the project owner)
+        stmt = stmt.where(ProjectVersion.crm_user_id == created_by_id)
+    if submitted_to_id:
+        stmt = stmt.where(
+            exists().where(ApprovalRequest.project_id == Project.id, ApprovalRequest.approver_id == submitted_to_id)
+        )
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(Project.project_code.ilike(pattern) | ProjectVersion.name.ilike(pattern))

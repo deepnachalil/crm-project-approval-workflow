@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { projectsApi } from "../api";
+import { useAuth } from "../auth/AuthContext";
 import { Alert, ErrorAlert, Loading } from "../components/Feedback";
 import { ActiveBadge, StatusBadge } from "../components/StatusBadge";
 import { Tabs } from "../components/Tabs";
@@ -25,6 +26,7 @@ const DONE_MESSAGES: Record<WorkflowAction, string> = {
 export function ProjectDetailPage() {
   const projectId = Number(useParams().id);
   const [searchParams] = useSearchParams();
+  const { user, hasRole } = useAuth();
   const project = useAsync(() => projectsApi.get(projectId), [projectId]);
   const [tab, setTab] = useState<DetailTab>("config");
   const [viewing, setViewing] = useState<number | null>(null); // version number shown in the config tab
@@ -93,6 +95,11 @@ export function ProjectDetailPage() {
       </div>
 
       {notice && <Alert kind="success">{notice}</Alert>}
+      {hasRole("CRM") && current.crm_user.id !== user?.id && (
+        <Alert kind="info" title="Read-only">
+          Only {current.crm_user.full_name}, the project&apos;s CRM / Creator, can edit, manage contracts or submit this project.
+        </Alert>
+      )}
       {p.status === "REJECTED" && decision?.comment && (
         <Alert kind="error" title={`Rejected by ${decision.decided_by?.full_name} on ${formatDateTime(decision.decided_at)}`}>
           <p className="pre">{decision.comment}</p>

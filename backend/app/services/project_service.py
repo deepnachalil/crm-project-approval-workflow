@@ -51,6 +51,13 @@ def load_project(db: Session, project_id: int, *, for_update: bool = False) -> P
     return project
 
 
+def ensure_can_view(db: Session, user: User, project_id: int) -> None:
+    """CRM users see every project. Approvers only see projects that were submitted to them
+    (the approver the CRM selected); anything else is reported as not found."""
+    if user.role_name == RoleName.APPROVER and not approval_repo.exists_for_approver(db, project_id, user.id):
+        raise NotFoundError("Project not found")
+
+
 def touch(project: Project) -> None:
     project.updated_at = utcnow()
 
@@ -200,7 +207,7 @@ def _new_version_from(db: Session, project: Project, source: ProjectVersion, use
 def editable_version(db: Session, project: Project, user: User) -> ProjectVersion:
     """Return the version that edits should be applied to (creating one if needed)."""
     latest = project.latest_version
-    blocker = policies.edit_blocker(latest)
+    blocker = policies.owner_blocker(user, latest) or policies.edit_blocker(latest)
     if blocker:
         raise blocker
     if latest.status == VersionStatus.APPROVED:
@@ -260,7 +267,11 @@ def update_project(db: Session, user: User, project_id: int, data: ProjectUpdate
 
 
 def can_edit(user: User, latest: ProjectVersion) -> bool:
-    return user.role_name == RoleName.CRM and policies.edit_blocker(latest) is None
+    return (
+        user.role_name == RoleName.CRM
+        and policies.owner_blocker(user, latest) is None
+        and policies.edit_blocker(latest) is None
+    )
 
 
 def list_projects(
@@ -273,7 +284,8 @@ def list_projects(
     search: str | None = None,
 ) -> list[ProjectSummary]:
     rows = project_repo.list_projects(
-        db, status=status, client_id=client_id, created_by_id=created_by_id, search=search
+        db, status=status, client_id=client_id, created_by_id=created_by_id, search=search,
+        submitted_to_id=user.id if user.role_name == RoleName.APPROVER else None,
     )
     active = project_repo.active_version_numbers(db, [p.id for p, _ in rows])
     return [presenters.project_summary(p, v, active.get(p.id), can_edit(user, v)) for p, v in rows]
@@ -281,13 +293,14 @@ def list_projects(
 
 def project_detail(db: Session, user: User, project_id: int) -> ProjectDetail:
     project = load_project(db, project_id)
+    ensure_can_view(db, user, project.id)
     latest, active = project.latest_version, project.active_version
     decisions = approval_repo.latest_by_version(db, [v.id for v in (latest, active) if v])
     return ProjectDetail(
         id=project.id,
         project_code=project.project_code,
         status=latest.status,
-        created_by=UserRef.model_validate(project.created_by),
+        created_by=UserRef.model_validate(latest.crm_user),   # the CRM / Creator (owner)
         created_at=project.created_at,
         updated_at=project.updated_at,
         current_version=presenters.version_out(latest, decisions.get(latest.id)),

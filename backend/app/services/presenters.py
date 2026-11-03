@@ -65,7 +65,8 @@ def project_summary(
         status=latest.status,
         current_version_number=latest.version_number,
         active_version_number=active_version_number,
-        created_by=UserRef.model_validate(project.created_by),
+        # "Created By" shows the project's CRM / Creator - the owner who can edit it.
+        created_by=UserRef.model_validate(latest.crm_user),
         created_at=project.created_at,
         updated_at=project.updated_at,
         can_edit=can_edit,

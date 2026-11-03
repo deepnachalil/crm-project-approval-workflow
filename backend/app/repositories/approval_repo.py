@@ -12,6 +12,15 @@ def pending_for_version(db: Session, version_id: int) -> ApprovalRequest | None:
     )
 
 
+def exists_for_approver(db: Session, project_id: int, approver_id: int) -> bool:
+    """Has this project ever been submitted to this approver?"""
+    return db.scalar(
+        select(ApprovalRequest.id)
+        .where(ApprovalRequest.project_id == project_id, ApprovalRequest.approver_id == approver_id)
+        .limit(1)
+    ) is not None
+
+
 def list_for_project(db: Session, project_id: int) -> list[ApprovalRequest]:
     return list(
         db.scalars(

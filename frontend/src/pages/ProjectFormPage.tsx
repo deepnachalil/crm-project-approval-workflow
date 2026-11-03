@@ -168,10 +168,17 @@ export function ProjectFormPage() {
 
   const actions = project?.allowed_actions ?? [];
   if (project && !actions.includes("edit")) {
+    const owner = project.current_version.crm_user;
+    const reason =
+      owner.id !== user?.id
+        ? `Only ${owner.full_name}, the project's CRM / Creator, can edit it.`
+        : project.status === "PENDING_APPROVAL"
+          ? "It is pending approval."
+          : "It is locked.";
     return (
       <section>
-        <Alert kind="warning" title="This project cannot be edited right now">
-          It is {project.status === "PENDING_APPROVAL" ? "pending approval" : "locked"}. <Link to={`/projects/${project.id}`}>View project</Link>
+        <Alert kind="warning" title="This project cannot be edited">
+          {reason} <Link to={`/projects/${project.id}`}>View project</Link>
         </Alert>
       </section>
     );

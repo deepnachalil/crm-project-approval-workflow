@@ -35,7 +35,7 @@ def submit(db: Session, user: User, project_id: int, comment: str | None, *, res
     project = load_project(db, project_id, for_update=True)
     version = project.latest_version
 
-    blocker = policies.submit_blocker(version, resubmission=resubmission)
+    blocker = policies.owner_blocker(user, version) or policies.submit_blocker(version, resubmission=resubmission)
     if blocker:
         raise blocker
     issues = submission_issues(version)

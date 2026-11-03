@@ -12,6 +12,14 @@ def ensure_role(user: User, *roles: RoleName) -> None:
         raise PermissionDeniedError(f"This action requires role: {', '.join(roles)}")
 
 
+def owner_blocker(user: User, latest: ProjectVersion) -> AppError | None:
+    """Only the project's CRM / Creator may change it (edit, contracts, submit, resubmit).
+    Other CRM users can view every project but have read-only access."""
+    if latest.crm_user_id != user.id:
+        return PermissionDeniedError("Only the project's CRM / Creator can change this project")
+    return None
+
+
 def edit_blocker(latest: ProjectVersion) -> AppError | None:
     """Editing targets the latest version: Draft/Rejected are edited in place,
     Approved spawns a new draft version, Pending Approval is locked."""
@@ -44,7 +52,7 @@ def decision_blocker(user: User, latest: ProjectVersion) -> AppError | None:
 def allowed_actions(user: User, project: Project) -> list[str]:
     latest = project.latest_version
     actions: list[str] = []
-    if user.role_name == RoleName.CRM:
+    if user.role_name == RoleName.CRM and owner_blocker(user, latest) is None:
         if edit_blocker(latest) is None:
             actions += ["edit", "manage_contracts"]
         if submit_blocker(latest, resubmission=False) is None:

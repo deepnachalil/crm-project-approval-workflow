@@ -146,7 +146,7 @@ class ProjectSummary(BaseModel):
     status: VersionStatus
     current_version_number: int
     active_version_number: int | None
-    created_by: UserRef
+    created_by: UserRef   # the project's CRM / Creator (owner); the audit trail keeps who created the record
     created_at: datetime
     updated_at: datetime
     can_edit: bool

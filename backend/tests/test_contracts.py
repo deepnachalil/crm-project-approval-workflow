@@ -7,6 +7,8 @@ def test_upload_list_view_and_download(api, db):
     assert contract["content_type"] == "application/pdf"
 
     assert [c["id"] for c in api.get("crm", f"/projects/{project['id']}/contracts").json()] == [contract["id"]]
+    # The assigned approver can view and download contracts once the project is submitted to them.
+    assert api.post("crm", f"/projects/{project['id']}/submit", json={}).status_code == 200
     assert api.get("approver", f"/contracts/{contract['id']}").json()["document_type"] == "Master Services Agreement"
 
     url = api.get("approver", f"/contracts/{contract['id']}/download-url", params={"disposition": "inline"}).json()["url"]

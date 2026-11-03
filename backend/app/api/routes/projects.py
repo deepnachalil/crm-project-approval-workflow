@@ -53,29 +53,34 @@ def update_project(project_id: int, body: ProjectUpdate, db: DbSession, user: Cr
 
 
 @router.get("/{project_id}/readiness", response_model=ReadinessOut)
-def readiness(project_id: int, db: DbSession, _: CurrentUserDep) -> ReadinessOut:
+def readiness(project_id: int, db: DbSession, user: CurrentUserDep) -> ReadinessOut:
+    project_service.ensure_can_view(db, user, project_id)
     return project_service.readiness(db, project_id)
 
 
 @router.get("/{project_id}/versions", response_model=list[VersionSummary])
-def list_versions(project_id: int, db: DbSession, _: CurrentUserDep) -> list[VersionSummary]:
+def list_versions(project_id: int, db: DbSession, user: CurrentUserDep) -> list[VersionSummary]:
+    project_service.ensure_can_view(db, user, project_id)
     return project_service.version_history(db, project_id)
 
 
 @router.get("/{project_id}/versions/{version_number}", response_model=VersionOut)
-def get_version(project_id: int, version_number: int, db: DbSession, _: CurrentUserDep) -> VersionOut:
+def get_version(project_id: int, version_number: int, db: DbSession, user: CurrentUserDep) -> VersionOut:
+    project_service.ensure_can_view(db, user, project_id)
     return project_service.get_version(db, project_id, version_number)
 
 
 @router.get("/{project_id}/approvals", response_model=list[ApprovalOut])
-def approval_history(project_id: int, db: DbSession, _: CurrentUserDep) -> list[ApprovalOut]:
+def approval_history(project_id: int, db: DbSession, user: CurrentUserDep) -> list[ApprovalOut]:
     project_service.load_project(db, project_id)
+    project_service.ensure_can_view(db, user, project_id)
     return [presenters.approval_out(r) for r in approval_repo.list_for_project(db, project_id)]
 
 
 @router.get("/{project_id}/audit", response_model=list[AuditEventOut])
-def audit_trail(project_id: int, db: DbSession, _: CurrentUserDep) -> list[AuditEventOut]:
+def audit_trail(project_id: int, db: DbSession, user: CurrentUserDep) -> list[AuditEventOut]:
     project_service.load_project(db, project_id)
+    project_service.ensure_can_view(db, user, project_id)
     return [presenters.audit_out(e) for e in audit_repo.list_for_project(db, project_id)]
 
 

@@ -28,7 +28,10 @@ export function ProjectListPage() {
   return (
     <section>
       <div className="page-header">
-        <h1>Projects</h1>
+        <div>
+          <h1>Projects</h1>
+          {hasRole("APPROVER") && <p className="muted">Projects submitted to you for approval</p>}
+        </div>
         {hasRole("CRM") && (
           <Link to="/projects/new" className="btn btn-primary">+ New Project</Link>
         )}

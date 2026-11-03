@@ -99,8 +99,10 @@ def test_project_listing_and_filters(api, db):
     b = api.ready_project(db, "PRJ-B")
     api.post("crm", f"/projects/{b['id']}/submit", json={})
 
-    rows = api.get("approver", "/projects").json()
+    rows = api.get("crm", "/projects").json()
     assert {r["project_code"] for r in rows} == {"PRJ-A", "PRJ-B"}
+    # Approvers only see what was submitted to them, never other people's drafts.
+    assert {r["project_code"] for r in api.get("approver", "/projects").json()} == {"PRJ-B"}
     row = next(r for r in rows if r["project_code"] == "PRJ-B")
     assert row["status"] == "PENDING_APPROVAL"
     assert row["current_version_number"] == 1

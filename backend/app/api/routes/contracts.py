@@ -8,7 +8,7 @@ from app.api.deps import CrmUser, CurrentUserDep, DbSession
 from app.config import get_settings
 from app.errors import ValidationFailedError, issue
 from app.schemas.project import ContractOut
-from app.services import contract_service
+from app.services import contract_service, project_service
 
 router = APIRouter(tags=["contracts"])
 
@@ -20,8 +20,9 @@ class DownloadUrlOut(BaseModel):
 
 @router.get("/projects/{project_id}/contracts", response_model=list[ContractOut])
 def list_contracts(
-    project_id: int, db: DbSession, _: CurrentUserDep, version: int | None = None
+    project_id: int, db: DbSession, user: CurrentUserDep, version: int | None = None
 ) -> list[ContractOut]:
+    project_service.ensure_can_view(db, user, project_id)
     return [ContractOut.model_validate(c) for c in contract_service.list_contracts(db, project_id, version)]
 
 
@@ -55,18 +56,22 @@ async def upload_contract(
 
 
 @router.get("/contracts/{contract_id}", response_model=ContractOut)
-def get_contract(contract_id: int, db: DbSession, _: CurrentUserDep) -> ContractOut:
-    return ContractOut.model_validate(contract_service.get_contract(db, contract_id))
+def get_contract(contract_id: int, db: DbSession, user: CurrentUserDep) -> ContractOut:
+    contract = contract_service.get_contract(db, contract_id)
+    project_service.ensure_can_view(db, user, contract.version.project_id)
+    return ContractOut.model_validate(contract)
 
 
 @router.get("/contracts/{contract_id}/download-url", response_model=DownloadUrlOut)
 def contract_download_url(
     contract_id: int,
     db: DbSession,
-    _: CurrentUserDep,
+    user: CurrentUserDep,
     disposition: Literal["inline", "attachment"] = "attachment",
 ) -> DownloadUrlOut:
     """Short-lived URL (S3 presigned URL on AWS, signed local link in development)."""
+    contract = contract_service.get_contract(db, contract_id)
+    project_service.ensure_can_view(db, user, contract.version.project_id)
     url = contract_service.contract_download_url(db, contract_id, disposition)
     return DownloadUrlOut(url=url, expires_in=get_settings().download_url_expires_seconds)
 
