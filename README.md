@@ -12,6 +12,18 @@ A full-stack application for configuring client projects and routing them throug
 > (Mumbai) from `infra/template.yaml`. No AWS credentials are stored anywhere in this repository; the
 > running app uses IAM roles. See [§10](#10-aws-deployment).
 
+### Live demo
+
+| | |
+|---|---|
+| **Application** | http://crm-projects-dev-frontendbucket-onol6ynouez0.s3-website.ap-south-1.amazonaws.com |
+| **API** | https://be6ogbtvy2.execute-api.ap-south-1.amazonaws.com/dev (health check: `/health`) |
+| **CRM logins** | `crm@example.com`, `crm2@example.com` |
+| **Approver logins** | `approver@example.com`, `approver2@example.com` |
+| **Password (all)** | `Password123!` |
+
+Mock demo accounts only (see [§7](#7-test-credentials)). Design assumptions are listed in [§13](#13-design-decisions-assumptions--known-limitations).
+
 ---
 
 ## Table of contents
@@ -28,7 +40,7 @@ A full-stack application for configuring client projects and routing them throug
 10. [AWS deployment](#10-aws-deployment)
 11. [Testing](#11-testing)
 12. [Security notes](#12-security-notes)
-13. [Design decisions & known limitations](#13-design-decisions--known-limitations)
+13. [Design decisions, assumptions & known limitations](#13-design-decisions-assumptions--known-limitations)
 
 ---
 
@@ -356,7 +368,8 @@ The rate-card catalog, standard job categories and picklists are configured in
 
 ## 7. Test credentials
 
-Created by `python -m app.migrate_handler --seed` **for local development only**:
+Mock accounts for **both roles**. They work **locally** (created by `python -m app.migrate_handler --seed`) and on
+the **deployed AWS application** (created in Cognito, with matching database rows):
 
 | Role | Email | Password |
 |---|---|---|
@@ -365,8 +378,9 @@ Created by `python -m app.migrate_handler --seed` **for local development only**
 | Approver | `approver@example.com` (Rahul Verma) | `Password123!` |
 | Approver | `approver2@example.com` (Neha Kapoor) | `Password123!` |
 
-These are mock accounts on `example.com`. Override the password with `SEED_DEMO_PASSWORD`. Two sample
-clients are also seeded. On AWS, users are created in Cognito and matched to database rows by email.
+These are mock accounts on `example.com`, not real credentials. Locally, override the password with
+`SEED_DEMO_PASSWORD`. Two sample clients are also seeded. On AWS, users are created in Cognito and matched to
+database rows by email; the role always comes from the database.
 
 ---
 
@@ -581,7 +595,23 @@ then point `CodeUri` at that folder and run `aws cloudformation package` + `aws 
 
 ---
 
-## 13. Design decisions & known limitations
+## 13. Design decisions, assumptions & known limitations
+
+### Design assumptions
+
+Where the requirement left a point open, these assumptions were made:
+
+- **GST Number is mandatory for every client.** Indian entities (country `IN`) must give a valid 15-character GSTIN. Non-Indian entities have no GSTIN, so they give their tax registration number (VAT / EIN / TRN). A *Country of Registration* field was added to apply the right rule. The GSTIN format is validated; checking that a GSTIN is actually registered would need the government GST API and is out of scope.
+- **Billing address is optional when it is the same as the registered address** ("Same as registered address" checkbox); the registered address is then stored as the billing address.
+- **Primary Contact (name, designation, phone, email) is mandatory**, so every client has a reachable contact person.
+- **All CRM users share one project list** (the list has *Created By* and a *Creator* filter), but **only the project's CRM / Creator can edit it**, manage its contracts, submit or resubmit it. Other CRM users have read-only access.
+- **Approvers only see projects submitted to them** (the approver the CRM selected) and only the assigned approver can approve or reject.
+- **Drafts may be saved incomplete;** completeness (mandatory fields, client GST Number, at least one contract, job categories with rate cards) is enforced when the project is submitted.
+- **Single organisation (single-tenant).** Demo data uses Indian clients, INR rate cards and the Mumbai (`ap-south-1`) region.
+- **Users are provisioned by an administrator** (no self sign-up); roles are stored in the application database.
+- **The frontend is served from S3 website hosting (HTTP)** until the AWS account is verified for CloudFront; switching to CloudFront/HTTPS is one template parameter (`FrontendHosting=cloudfront`).
+
+### Design decisions & known limitations
 
 - **FastAPI + Mangum** lets the same ASGI app run under uvicorn locally and in Lambda, with no separate code paths.
 - **Version-centric model:** all configuration lives on immutable-once-submitted `project_versions`. This makes "never overwrite the approved version" structural, not a convention.
